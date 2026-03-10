@@ -20,6 +20,7 @@ google-auth-httplib2==0.3.0
 google-genai==1.66.0
 google-generativeai==0.8.6
 googleapis-common-protos==1.73.0
+groq==0.37.1
 grpcio==1.78.0
 grpcio-status==1.71.2
 h11==0.16.0
@@ -35,6 +36,7 @@ jsonpointer==3.0.0
 langchain==1.2.10
 langchain-core==1.2.18
 langchain-google-genai==4.2.1
+langchain-groq==1.1.2
 langgraph==1.0.10
 langgraph-checkpoint==4.0.1
 langgraph-prebuilt==1.0.8

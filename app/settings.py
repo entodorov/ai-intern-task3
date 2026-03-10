@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     supabase_url: str = Field(..., env="SUPABASE_URL")
     supabase_key: str = Field(..., env="SUPABASE_KEY")
     gemini_api_key: str = Field(..., env="GEMINI_API_KEY")
+    groq_api_key: str = Field(..., env="GROQ_API_KEY")
 
     class Config:
         env_file = ".env"
