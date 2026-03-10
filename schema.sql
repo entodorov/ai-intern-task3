@@ -1,77 +1,18 @@
--- ==========================================
--- ТАБЛИЦА 1: meetings (Сурови данни)
--- Тук пазим оригиналната информация за всяка среща.
--- ==========================================
+-- 1. Създаване на таблицата за срещите
 CREATE TABLE meetings (
-    -- UUID (Universally Unique Identifier) е дълъг и сложен низ от символи.
-    -- Използваме го вместо обикновени числа (1, 2, 3), защото е по-сигурен и уникален.
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
-    -- Заглавието на срещата (напр. "AI TEAM MEETING")
-    title TEXT NOT NULL,
-    
-    -- Датата, на която се е провела срещата
-    meeting_date DATE,
-    
-    -- Към кой проект принадлежи (напр. "edamame", "gatekeeper")
-    source TEXT,
-    
-    -- Тук пазим целия текст (или нарязаните парчета - chunks).
-    raw_transcript TEXT,
-    
-    -- Автоматично записва точния час и дата, когато редът е създаден в базата.
-    -- 'now()' казва на Postgres да вземе текущото време на сървъра.
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  title TEXT NOT NULL,
+  raw_transcript TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
 
--- ==========================================
--- ТАБЛИЦА 2: notes (AI Анализ)
--- Тук ще пазим умните резултати, които изкуственият интелект ще генерира.
--- ==========================================
+-- 2. Създаване на таблицата за бележките
 CREATE TABLE notes (
-    -- Всяка бележка си има свое собствено уникално ID
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    
-    -- FOREIGN KEY (Външен ключ): Това е НАЙ-ВАЖНАТА връзка!
-    -- Този ред казва: "Тази бележка принадлежи на точно определена среща от горната таблица".
-    -- ON DELETE CASCADE означава: "Ако изтрия срещата, автоматично изтрий и нейните бележки".
-    meeting_id UUID REFERENCES meetings(id) ON DELETE CASCADE,
-    
-    -- Кратко текстово резюме на срещата
-    summary TEXT,
-    
-    -- JSONB формат за задачите (Кой какво трябва да направи).
-    -- Използваме JSONB, защото структурата може да варира, а Postgres е супер бърз с JSON.
-    action_items JSONB,
-    
-    -- Ключови изводи и решения (също в JSONB формат)
-    key_takeaways JSONB,
-    
-    -- Основни теми, които са били обсъдени
-    topics JSONB
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  meeting_id UUID REFERENCES meetings(id) ON DELETE CASCADE,
+  summary TEXT NOT NULL,
+  action_items JSONB NOT NULL,
+  decisions JSONB NOT NULL,
+  llm TEXT DEFAULT 'gemini-2.5-flash',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
 );
-
-
-
-
--- Менторът: "Защо използваш UUID (като 45945f85-8bca...) за id колоната, вместо обикновено авто-увеличаващо се число като 1, 2, 3?"
-
---     Ти: "Има две основни причини. Първо, сигурност – ако ID-то е число, някой хакер може лесно да налучка следващата
---      среща (напр. site.com/meeting/5). С UUID това е математически невъзможно. Второ, ако 
---      системата стане огромна и използваме множество сървъри (distributed system), UUID гарантира, 
---      че няма да има две срещи с едно и също ID, дори да са създадени по едно и също време на различни
---       места."
-
--- Менторът: "Какво точно прави REFERENCES meetings(id) в таблицата notes?"
-
---     Ти: "Това създава Relational Database връзка (Foreign Key). То предпазва базата от 'сираци' 
---     (orphan records). Системата физически няма да ми позволи да създам резюме в notes за среща, 
---     която не съществува в таблицата meetings. Това гарантира пълна цялост на данните (Data Integrity)."
-
--- Менторът: "Виждам, че за action_items и key_takeaways си избрал JSONB формат, а не обикновен TEXT. Защо?"
-
---     Ти: "Защото това са резултати от AI модел. Моделите често връщат списъци от обекти 
---     (напр. [{"task": "Пиши код", "assignee": "Емо"}]). Ако го запазя като TEXT, после ще ми 
---     е много трудно да търся вътре. JSONB (Binary JSON) в PostgreSQL ми позволява да правя 
---     сложни заявки – например мога директно чрез SQL да попитам: 'Дай ми всички срещи, в които 
---     Емо има задача'."
