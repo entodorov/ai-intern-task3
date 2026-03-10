@@ -3,6 +3,7 @@ import time
 import json
 import io
 import docx
+from pypdf import PdfReader
 from enum import Enum
 from fastapi import FastAPI, HTTPException, status, UploadFile, File, Form
 from pydantic import BaseModel, Field
@@ -64,7 +65,7 @@ class StructuredNotes(BaseModel):
     action_items: list[str] = Field(description="Списък със задачи за изпълнение")
     decisions: list[str] = Field(description="Списък с взетите решения")
 
-@app.get("/meetings", response_model=List[MeetingMetadata], summary="Вземане на всички срещи", description="Връща списък с всички срещи и флаг дали имат генерирани бележки.")
+@app.get("/meetings", response_model=List[MeetingMetadata], summary="Вземане на всички срещи")
 def get_meetings():
     try:
         meetings_res = supabase.table("meetings").select("id, title, created_at").execute()
@@ -87,7 +88,7 @@ def get_meetings():
         logger.error(f"Грешка при взимане на срещите: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Възникна сървърна грешка.")
 
-@app.get("/meetings/{meeting_id}", response_model=MeetingDetail, summary="Детайли за конкретна среща", description="Връща пълния транскрипт и детайлите за една среща по нейното ID.")
+@app.get("/meetings/{meeting_id}", response_model=MeetingDetail, summary="Детайли за конкретна среща")
 def get_meeting(meeting_id: str):
     response = supabase.table("meetings").select("*").eq("id", meeting_id).execute()
     
@@ -96,10 +97,11 @@ def get_meeting(meeting_id: str):
     
     return response.data[0]
 
-@app.post("/meetings", summary="Създаване на нова среща", description="Приема .txt или .docx файл, парсва го и го записва в базата данни.")
+@app.post("/meetings", summary="Създаване на нова среща")
 async def create_meeting(title: str = Form(...), file: UploadFile = File(...)):
-    if not (file.filename.endswith(".txt") or file.filename.endswith(".docx")):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Позволени са само .txt и .docx файлове.")
+    allowed_ext = [".txt", ".docx", ".pdf"]
+    if not any(file.filename.endswith(ext) for ext in allowed_ext):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Позволени са само .txt, .docx и .pdf файлове.")
     
     try:
         content_bytes = await file.read()
@@ -108,6 +110,9 @@ async def create_meeting(title: str = Form(...), file: UploadFile = File(...)):
         if file.filename.endswith(".docx"):
             doc = docx.Document(io.BytesIO(content_bytes))
             extracted_text = " ".join([p.text for p in doc.paragraphs if p.text.strip()])
+        elif file.filename.endswith(".pdf"):
+            pdf_reader = PdfReader(io.BytesIO(content_bytes))
+            extracted_text = " ".join([page.extract_text() for page in pdf_reader.pages if page.extract_text()])
         else:
             extracted_text = content_bytes.decode("utf-8")
         
@@ -124,7 +129,7 @@ async def create_meeting(title: str = Form(...), file: UploadFile = File(...)):
         logger.error(f"Грешка при обработка на файла: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Грешка при обработка на файла.")
 
-@app.post("/meetings/{meeting_id}/process", summary="Генериране на AI бележки", description="Използва избран LLM модел (Gemini или Groq), за да анализира транскрипта и да извади резюме, задачи и решения.")
+@app.post("/meetings/{meeting_id}/process", summary="Генериране на AI бележки")
 def process_meeting_notes(meeting_id: str, llm_model: LLMChoice = LLMChoice.gemini_flash):
     current_time = time.time()
     if meeting_id in RATE_LIMIT_CACHE:
@@ -148,9 +153,7 @@ def process_meeting_notes(meeting_id: str, llm_model: LLMChoice = LLMChoice.gemi
     except:
         full_text = raw_data
 
-    # Защита от претоварване на Groq (лимит 6000 токена на минута за безплатен акаунт)
     if "groq" in llm_model.value and len(full_text) > 15000:
-        logger.warning(f"Текстът е твърде дълъг за Groq ({len(full_text)} символа). Орязваме го до безопасно ниво.")
         full_text = full_text[:15000] + "\n\n... [Текстът е съкратен поради безплатните лимити на Groq API]"
 
     model_name_str = llm_model.value
@@ -191,10 +194,9 @@ def process_meeting_notes(meeting_id: str, llm_model: LLMChoice = LLMChoice.gemi
         
     except Exception as e:
         del RATE_LIMIT_CACHE[meeting_id]
-        logger.error(f"Подробна грешка от LLM: {str(e)}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Възникна грешка при връзката с AI модела: {str(e)}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Грешка при AI модела: {str(e)}")
 
-@app.get("/meetings/{meeting_id}/notes", response_model=List[NoteResponse], summary="Вземане на бележки", description="Връща всички генерирани бележки и решения за конкретна среща.")
+@app.get("/meetings/{meeting_id}/notes", response_model=List[NoteResponse], summary="Вземане на бележки")
 def get_meeting_notes(meeting_id: str):
     response = supabase.table("notes").select("*").eq("meeting_id", meeting_id).execute()
     
