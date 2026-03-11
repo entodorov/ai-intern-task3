@@ -1,22 +1,24 @@
 AI Meeting Notes API (FastAPI)
 
-Това е REST API услуга, изградена с FastAPI, която позволява качване на транскрипции от срещи (като .txt или .docx файлове) и автоматично извличане на структурирани бележки (резюме, задачи, решения) с помощта на LLM.
+Това е REST API услуга, изградена с FastAPI, която позволява качване на транскрипции от срещи (като .txt, .docx или .pdf файлове) и автоматично извличане на структурирани бележки (резюме, задачи, решения) с помощта на AI модели (LLM).
 
-Архитектура и функционалности (Stretch Goals)
+🚀 Архитектура и функционалности (Stretch Goals)
 
 Чиста архитектура (Clean Code): Разделени модули за конфигурация (settings.py) и основна логика (main.py).
 
 Pydantic Validation: Всички Request и Response обекти са строго типизирани и валидирани с Pydantic.
 
-File Upload: Директно качване и парсване на Word (.docx) и .txt документи чрез ендпойнта за създаване на срещи.
+File Upload: Директно качване и парсване на Word (.docx), PDF (.pdf) и .txt документи чрез ендпойнта за създаване на срещи.
 
-Multi-LLM поддръжка: Възможност за избор на AI модел при генериране на бележки чрез падащо меню (Dropdown) в Swagger интерфейса (gemini-2.5-flash или gemini-1.5-pro).
+Multi-LLM поддръжка: Възможност за избор на AI модел при генериране на бележки чрез падащо меню (Dropdown) в Swagger интерфейса. Поддържат се Google Gemini (Gemini 2.5 Flash / 1.5 Pro) и светкавично бързият Groq (Llama 3.1 / 3.3).
+
+Автоматична защита (Safety Truncation): Системата автоматично засича, ако текстът е твърде дълъг за безплатните лимити на Groq, и го съкращава безопасно, за да предотврати HTTP 413 грешки.
 
 Rate Limiting: Вграден In-Memory кеш, предпазващ /process ендпойнта от спам и претоварване на AI API-то (15 секунди cooldown).
 
 Logging & Error Handling: Консистентни HTTP грешки (400, 404, 429, 500) и детайлно логване на процесите в конзолата.
 
-Инсталация и стартиране на нов компютър (Local Setup)
+⚙️ Инсталация и стартиране на нов компютър (Local Setup)
 
 Тъй като проектът следва най-добрите практики за сигурност, чувствителните данни и виртуалната среда не се качват в GitHub. Следвайте тези стъпки, за да стартирате проекта локално:
 
@@ -42,7 +44,7 @@ source venv/bin/activate
 
 3. Инсталиране на зависимостите
 
-Всички нужни библиотеки са запазени предварително:
+Всички нужни библиотеки (вкл. LangChain, Supabase, PyPDF, Groq) са запазени предварително:
 
 pip install -r requirements.txt
 
@@ -54,6 +56,7 @@ pip install -r requirements.txt
 SUPABASE_URL=вашият_supabase_url
 SUPABASE_KEY=вашият_supabase_anon_key
 GEMINI_API_KEY=вашият_gemini_api_key
+GROQ_API_KEY=вашият_groq_api_key
 
 
 5. Стартиране на сървъра
@@ -79,14 +82,14 @@ curl -X 'GET' \
 
 2. Създаване на нова среща (чрез качване на файл)
 
-Позволява качване на .docx или .txt файл. Системата автоматично го парсва и "нарязва" (chunking) преди да го запише в базата данни.
+Позволява качване на .docx, .pdf или .txt файл. Системата автоматично го парсва и "нарязва" (chunking) преди да го запише в базата данни.
 
 curl -X 'POST' \
   'http://localhost:8000/meetings' \
   -H 'accept: application/json' \
   -H 'Content-Type: multipart/form-data' \
   -F 'title=Седмична среща на екипа' \
-  -F 'file=@/път/до/вашия/файл.docx'
+  -F 'file=@/път/до/вашия/файл.pdf'
 
 
 3. Генериране на бележки (Multi-LLM & Rate Limited)
@@ -94,7 +97,7 @@ curl -X 'POST' \
 Извиква AI модела за обработка. Има In-memory cooldown от 15 секунди между извикванията за една и съща среща.
 
 curl -X 'POST' \
-  'http://localhost:8000/meetings/{MEETING_ID}/process?llm_model=gemini-2.5-flash' \
+  'http://localhost:8000/meetings/{MEETING_ID}/process?llm_model=llama-3.1-8b-instant' \
   -H 'accept: application/json' \
   -d ''
 
