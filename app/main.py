@@ -3,9 +3,10 @@ import time
 import json
 import io
 import docx
+import datetime # Нови импорти
 from pypdf import PdfReader
 from enum import Enum
-from fastapi import FastAPI, HTTPException, status, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, status, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict
 from supabase import create_client, Client
@@ -15,6 +16,7 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 
 from app.settings import settings
+from app.services.google_docs import extract_doc_id, fetch_document_data # Импорт на нашия нов сървис
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +66,24 @@ class StructuredNotes(BaseModel):
     summary: str = Field(description="Кратко резюме на срещата (3-4 изречения)")
     action_items: list[str] = Field(description="Списък със задачи за изпълнение")
     decisions: list[str] = Field(description="Списък с взетите решения")
+
+# --- НОВИ МОДЕЛИ ЗА TASK 4 ---
+class GoogleDocItem(BaseModel):
+    title: str
+    google_doc_url: str
+
+class GoogleDocsImportRequest(BaseModel):
+    meetings: List[GoogleDocItem]
+
+class ImportResult(BaseModel):
+    title: str
+    status: str
+    message: str
+    external_id: Optional[str] = None
+
+class GoogleDocsImportResponse(BaseModel):
+    results: List[ImportResult]
+# -----------------------------
 
 @app.get("/meetings", response_model=List[MeetingMetadata], summary="Вземане на всички срещи")
 def get_meetings():
@@ -128,6 +148,71 @@ async def create_meeting(title: str = Form(...), file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Грешка при обработка на файла: {str(e)}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Грешка при обработка на файла.")
+
+# --- НОВ ЕНДПОЙНТ ЗА ТАСК 4 ---
+def process_single_google_doc(item: GoogleDocItem) -> ImportResult:
+    """Хелпър функция, която обработва един единичен документ."""
+    try:
+        # 1. Валидация и екстрактване на ID
+        doc_id = extract_doc_id(item.google_doc_url)
+        
+        # 2. Теглене на данните чрез сървис модула
+        doc_data = fetch_document_data(doc_id)
+        text_content = doc_data["text"]
+        real_title = doc_data["title"]
+        
+        # УМНА ЛОГИКА ЗА ЗАГЛАВИЕТО:
+        # Ако потребителят е оставил Swagger дефолтното "string", празно е, или е "1" -> ползваме истинското от Google
+        final_title = real_title if item.title in ["string", "", "1"] else item.title
+        
+        # 3. Записване в базата
+        chunk_size = 2000
+        chunks = [text_content[i:i+chunk_size] for i in range(0, len(text_content), chunk_size)]
+        transcript_json = json.dumps(chunks, ensure_ascii=False)
+        
+        data = {
+            "title": final_title,  # <-- Използваме умното заглавие
+            "raw_transcript": transcript_json,
+            "source": "google_docs",
+            "source_url": item.google_doc_url,
+            "external_id": doc_id,
+            "meeting_date": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+        supabase.table("meetings").insert(data).execute()
+        
+        return ImportResult(title=final_title, status="success", message="Успешно импортирана", external_id=doc_id)
+    except Exception as e:
+        logger.error(f"Грешка при импорт: {str(e)}")
+        return ImportResult(title=item.title, status="error", message=str(e), external_id=None)
+
+@app.post("/meetings/import/google-docs", response_model=GoogleDocsImportResponse, summary="Масов импорт от Google Docs")
+def import_google_docs(request: GoogleDocsImportRequest, background_tasks: BackgroundTasks, background: bool = False):
+    """
+    Импортира списък от Google Docs. 
+    Ако background=True, задачите се пускат във фонов режим (Stretch Goal).
+    """
+    results = []
+    
+    if background:
+        # Stretch Goal: Background Processing
+        for item in request.meetings:
+            try:
+                # Валидираме бързо URL-а
+                doc_id = extract_doc_id(item.google_doc_url)
+                # Пускаме тегленето да се случва във фонов режим, без да бави потребителя
+                background_tasks.add_task(process_single_google_doc, item)
+                results.append(ImportResult(title=item.title, status="queued", message="Добавена във фоновата опашка", external_id=doc_id))
+            except Exception as e:
+                # Ако URL-ът е невалиден, гърмим веднага
+                results.append(ImportResult(title=item.title, status="error", message=str(e)))
+    else:
+        # Стандартно синхронно изпълнение
+        for item in request.meetings:
+            res = process_single_google_doc(item)
+            results.append(res)
+            
+    return GoogleDocsImportResponse(results=results)
+# -----------------------------
 
 @app.post("/meetings/{meeting_id}/process", summary="Генериране на AI бележки")
 def process_meeting_notes(meeting_id: str, llm_model: LLMChoice = LLMChoice.gemini_flash):
@@ -202,5 +287,5 @@ def get_meeting_notes(meeting_id: str):
     
     if not response.data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Няма намерени бележки за тази среща.")
-        
+        f
     return response.data
